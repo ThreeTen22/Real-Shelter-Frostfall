@@ -307,9 +307,10 @@ Event OnUpdate()
      RS_IsSheltered.SetValue(0)
      RevertWeather()
      shelterTransf = false
+     RegisterForSingleUpdate(0.5)
      GotoState("FFS")
   EndIf
-  RegisterForSingleUpdate(1)
+  RegisterForSingleUpdate(0.5)
 EndEvent
 
 Event OnEndState()
