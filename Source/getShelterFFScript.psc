@@ -9,9 +9,7 @@ GlobalVariable Property RS_FFIsOn Auto
 
 
 int Property TentType Auto
-int[] Property RainPos Auto hidden
-float[] Property Snow1Pos Auto hidden
-float[] Property Snow2Pos Auto hidden
+
 
 
 
@@ -26,7 +24,6 @@ FormList Property RS_FFSnowOverrides Auto
 FormList Property RS_CurrentList Auto
 FormList Property RS_RSList Auto
 FormList Property RS_WSList Auto
-FormList Property RS_ActiveTentList Auto
 FormList Property _DE_SevereWeatherList Auto
 
 GlobalVariable Property RS_IsSheltered Auto
@@ -59,10 +56,13 @@ ObjectReference Property WeatherMarker Auto hidden
 RS_FFHelperScript Property ScriptHelper1 Auto hidden
 RS_FFHelperScript2 Property ScriptHelper2 Auto hidden
 
+RS_FFRainScript Property ScriptHelper3 Auto hidden
+
 static Property XMarker auto
 
 Activator Property RS_FFHelper Auto
 Activator Property RS_FFHelper2 Auto
+Activator Property RS_FFHelper3 Auto
 
 
 Actor Property PlayerREF auto
@@ -90,13 +90,14 @@ Bool alive = false
 Bool running = false
 Bool Updated = false
 Bool infWTHR = false
+Bool isRaining = false
+Bool isSnowing = false
 
 Bool snowEnabled = false
 Bool rainEnabled = true
 Weather CurrentWeather
 Weather RSWeather
 
-ObjectReference[] rain
 
 Event OnInit()
       ;Debug.Notification("Rainsoundfx2 " +rainsoundfx2.GetFormID())
@@ -163,7 +164,6 @@ Event OnLoad()
   	Trace(self + "I Have Loaded Once")
     EndIf
   GotoState("FFS")
-  ;RS_ActiveTentList.AddForm(self as Form)
 EndEvent
 
 int Function SetLocalVar()
@@ -205,7 +205,7 @@ State FFS
      Event OnLoad()
      	if SwitchTriggerCheck >= 3
        If RS_Debug.GetValue() != 0
-         Trace(self + "I Have loaded more than Twice Creating and Registering")
+         Trace(self + "I Have loaded more than Twice")
        EndIf
       RegisterForSingleUpdate(1)
       EndIf
@@ -243,7 +243,6 @@ State FFS
         shelterTransf = false
         RS_IsSheltered.SetValue(0)
         ShutdownTent()
-        DisableRain(false,true)
       EndEvent
 
       Event OnUpdate()
@@ -259,31 +258,31 @@ State FFS
           	        if rsWTHRClass == 2
           	            shelterTransf = true
           	            ActivateSoundFX(1)
+                        isRaining = true
           	        ElseIf rsWTHRClass == 3
                        shelterTransf = true
                        ActivateSoundFX(2)
+                        isSnowing = true
                     EndIf
         	      ElseIf GetTent == 0 && shelterTransf
-                  ;Trace("inside of 4th  b if Statement")
             	      RevertWeather()
+                    isRaining = false
+                    isSnowing = false
         	      Else
                   RS_TimeUnderShelter.Mod(1.0)
-        	        ;Trace(self+"GETTEnt:" + GetTent + "shelterTransf" + shelterTransf)
         	      EndIf  
-        	  Elseif shelterTransf
-              if !rain[0].isDisabled()
+        	  ElseIf shelterTransf
+                If isRaining
                 DisableRain(false)
-              Else 
-                DisableSnow(false)
-              EndIf
+                EndIf
+                If isSnowing
+                DisableSnow()
+                EndIf
               GotoState("WaitingToLeaveTent")
             EndIf
-            ;Trace("NewRegister  " + NewRegister(GetDistance(PlayerREF)))
-            ;RegisterForSingleUpdate(1)
             NewRegister(playerDistance)
         	Else
           NewRegister(playerDistance)
-          ;RegisterForSingleUpdate(1)
         	EndIf
       	EndIf
       EndEvent
@@ -305,12 +304,11 @@ Event OnUpdate()
   GetTent = CheckIfInside(TentType)
   If GetTent == 0
      RS_IsSheltered.SetValue(0)
-     RevertWeather()
      shelterTransf = false
      RegisterForSingleUpdate(0.5)
      GotoState("FFS")
   EndIf
-  RegisterForSingleUpdate(0.5)
+  RegisterForSingleUpdate(1)
 EndEvent
 
 Event OnEndState()
@@ -418,25 +416,37 @@ Function StartUpTent()
       RainAmount = RS_FFRainAmount.GetValue() as Int
       SnowAmount = RS_FFSnowAmount.GetValue() as Int
   EndIf
-
       CreateMarkers()
       CreateHelpers()
-      ;GetProperties()
       CreateSnowEvent()
-      CreateRain()
+      ScriptHelper1.isReady()
+      ScriptHelper2.isReady()
+      ScriptHelper3.isReady()
 EndFunction
 
 Function ShutdownTent()
-    RevertWeather()
-    DisableSnow(true)
-    DisableRain(false, true)
-    DeleteRain()
+    ScriptHelper1.RegisterForModEvent("RS_FFShutdown", "DeleteSelf")
+    ScriptHelper2.RegisterForModEvent("RS_FFShutdown", "DeleteSelf")
+    ScriptHelper3.RegisterForModEvent("RS_FFShutdown", "DeleteSelf")
+    int Handle = ModEvent.Create("RS_FFShutdown")
+    if (handle)
+      ModEvent.Send(handle)
+    EndIf
+    RevertWeather(false)
     DeleteMarkers()
     shelterTransf = false
     running = false
     RS_IsSheltered.SetValue(0)
+    Utility.Wait(0.1)
 EndFunction
 
+Function EnableRain(bool bFade)
+ScriptHelper3.EnableRain(bFade)
+EndFunction
+
+Function DisableRain(bool bFade, bool bFastMode = false)
+ScriptHelper3.DisableRain(bFade)
+EndFunction
 
 
 int Function SetLocalVar()
@@ -447,7 +457,7 @@ Return  0
 EndFunction
 
 
-int Function RevertWeather()
+int Function RevertWeather(bool bDisable = true)
   Weather Temp = Weather.GetCurrentWeather()
   If rsWTHRIndx != -1
     if RS_RSList.HasForm(Temp)
@@ -466,8 +476,10 @@ int Function RevertWeather()
     CurrentWeather.ForceActive()
     RS_Index.SetValue(rsWTHRIndx)
   EndIf
-    DisableSnow(false)
+    If bDisable
+    DisableSnow()
     DisableRain(true)
+    Endif
   Return 1
 EndFunction
 
@@ -489,8 +501,8 @@ EndFunction
 
 int Function DeleteMarkers()
   OriginPosition.Disable()
-  WeatherMarker.Disable()
   OriginPosition.Delete()
+  WeatherMarker.Disable()
   WeatherMarker.Delete()
 Return 0
 EndFunction
@@ -508,141 +520,29 @@ int Function CreateHelpers()
   ScriptHelper2 = PlaceAtMe(RS_FFHelper2) as RS_FFHelperScript2
   ScriptHelper2.SetPosition(relativePos[6],relativePos[7],relativePos[8])
   ScriptHelper2.GiveInfo(false, MHA, TentType,(relativePos[12]),RS_FFTentList,_DE_SevereWeatherList, RS_TimeUnderShelter, RS_Debug)
-  
+  ScriptHelper3 = PlaceAtMe(RS_FFHelper3) as RS_FFRainScript
+  ScriptHelper3.SetPosition(relativePos[6],relativePos[7],relativePos[8])
+  ScriptHelper3.GiveInfo(RS_Debug,RS_Index,RS_FFUseRSStatic,RS_FFRainAmount,RS_PrecipStatic, OriginPosition,TentType,0,Game.GetFormFromFile(0x0004F2C5,"RealShelter.esp"), relativePos[5])
   If RS_Debug.GetValue() != 0
     Trace("ScriptHelper1: " + ScriptHelper1)
     Trace("ScriptHelper2: " + ScriptHelper2)
+    Trace("ScriptHelper3: " + ScriptHelper3)
   EndIf
   
   Return 0
 EndFunction
 
-int Function CreateRain()
- int i = 0
- int i2 = RainAmount
- int FirstHalf = (RainAmount/2)
- float xPos
- float yPos
- float relePos = relativePos[5]
-
- Form rainNear
- Form rainFar 
-
-
- If RS_FFUseRSStatic
-    If RS_FFUseRSStatic.GetValue() >= 1
-      i2 = 6
-      FirstHalf = 3
-      rainNear = RS_PrecipStatic.GetAt(5)
-      rainFar = RS_PrecipStatic.GetAt(5)
-    Else
-      rainNear = RS_PrecipStatic.GetAt(0)
-      rainFar = RS_PrecipStatic.GetAt(1)
-    EndIf
- Else
-   rainNear = RS_PrecipStatic.GetAt(0)
-   rainFar = RS_PrecipStatic.GetAt(1)
- EndIf
-
-  If i2 < 21
-    rain = new ObjectReference[20]
-  ElseIF i2 > 20 && i2 < 41
-    rain = new ObjectReference[40]
-  ElseIF i2 > 40 && i2 < 61
-    rain = new ObjectReference[60]
-  ElseIF i2 > 60 && i2 < 81
-    rain = new ObjectReference[80]
-  ElseIF i2 > 80 && i2 < 101
-    rain = new ObjectReference[100]
-  Else 
-    rain = new ObjectReference[128]
-  EndIf
-
-   If TentType == 3
-    xPos = -3000*Sin(relePos)
-    YPos = -300*Cos(relePos)
-  ElseIf TentType == 4
-    xPos = 100*Sin(relePos)
-    YPos = 100*Cos(relePos)
-  EndIf
-  while i < rain.Length
-    if rain[i] == none
-     if i > FirstHalf
-      rain[i] = OriginPosition.PlaceAtMe(rainFar,1,abForcePersist = false, abInitiallyDisabled = true)
-      rain[i].MoveTo(OriginPosition,0,0,600)
-     Else
-      rain[i] = OriginPosition.PlaceAtMe(rainNear,1,abForcePersist = false, abInitiallyDisabled = true)
-      rain[i].MoveTo(OriginPosition,xPos,yPos,800)
-      
-      ;rain[i].MoveTo(OriginPosition,0,0,800)
-     EndIf
-      If TentType == 3
-      rain[i].SetAngle(0,0,relePos+90)
-      ElseIf TentType == 4
-      rain[i].SetAngle(0,0,relePos)  
-      EndIf
-    else
-      i += 1
-    endif
-   EndWhile
-  If RS_Debug.GetValue() != 0
-  Notification("Finished Creating Rain")
-  EndIf
-Return 0
-EndFunction
-
-Function EnableRain(bool bFade)
- Int iIndex = 0
-
-  While iIndex < rain.Length
-        if rain[iIndex] != none
-        rain[iIndex].EnableNoWait(bFade)
-        EndIf
-        iIndex += 1
-  EndWhile
-   If RS_Debug.GetValue() != 0
-    Notification("I am Enabling Rain " + rain.Length)
-    Trace("I Am Enabling Rain")
-  EndIf
-  Utility.Wait(0.2)
-EndFunction
-
-Function DisableRain(bool bFade, bool bFastMode = false)
- Int iIndex = 0
-  While iIndex < rain.Length
-        if rain[iIndex] != none
-        rain[iIndex].DisableNoWait(bFade)
-        EndIf
-        iIndex += 1
-  EndWhile
-  If !bFastMode
-  Utility.Wait(0.2)
-  EndIf
-EndFunction
-
-Function DeleteRain()
-    If RS_Debug.GetValue() != 0
-    Notification("I am Deleting Rain")
-    Trace("I Am Deleting Rain")
-    EndIf
-  Int iIndex = 0
-  While iIndex < RainAmount
-        rain[iIndex].Delete()
-        rain[iIndex] = none
-        iIndex += 1
-  EndWhile
-EndFunction
-
 
 Function CreateSnowEvent()
 
-ScriptHelper1.RegisterForModEvent("RS_CreateSnowEvent", "RS_CreateSnow")
-ScriptHelper2.RegisterForModEvent("RS_CreateSnowEvent", "RS_CreateSnow")
+ScriptHelper1.RegisterForModEvent("RS_Create", "RS_CreateSnow")
+ScriptHelper2.RegisterForModEvent("RS_Create", "RS_CreateSnow")
 Form tempForm = Game.GetFormFromFile(0x0004F2C5,"RealShelter.esp")
 
-  int Handle = ModEvent.Create("RS_CreateSnowEvent")
+  int Handle = ModEvent.Create("RS_Create")
     if (handle)
       ModEvent.PushForm(handle, tempForm)
+      ModEvent.PushFloat(handle, relativePos[5])
       ModEvent.Send(handle)
     EndIf
   
@@ -672,12 +572,11 @@ Function EnableSnow(float WTHRIndx)
 
 EndFunction
 
-Function DisableSnow(bool bDelete)
+Function DisableSnow()
   ScriptHelper1.RegisterForModEvent("RS_DisableSnow", "DisableSnow")
   ScriptHelper2.RegisterForModEvent("RS_DisableSnow", "DisableSnow")
    int handle = ModEvent.Create("RS_DisableSnow")
     if (handle)
-      ModEvent.PushBool(handle,bDelete)
       ModEvent.Send(handle)
     EndIf
 EndFunction
@@ -744,3 +643,125 @@ bool Function IsNearPlayer()
     return true
   endif
 endFunction
+
+;/
+int Function CreateRain()
+ int i = 0
+ int i2 = RainAmount
+ int FirstHalf = (RainAmount/2)
+ float xPos
+ float yPos
+ float xPosNear = 0.0
+ float yPosNear = 0.0
+ float relePos = relativePos[5]
+
+ Form rainNear
+ Form rainFar 
+
+
+ If RS_FFUseRSStatic
+    If RS_FFUseRSStatic.GetValue() >= 1
+      i2 = 6
+      FirstHalf = 6
+      xPosNear = 400.0*Sin(relePos)
+      YPosNear = 400.0*Cos(relePos)
+      rainNear = RS_PrecipStatic.GetAt(5)
+      rainFar = RS_PrecipStatic.GetAt(5)
+    Else
+      rainNear = RS_PrecipStatic.GetAt(0)
+      rainFar = RS_PrecipStatic.GetAt(1)
+    EndIf
+ Else
+   rainNear = RS_PrecipStatic.GetAt(0)
+   rainFar = RS_PrecipStatic.GetAt(1)
+ EndIf
+
+  If i2 < 21
+    rain = new ObjectReference[20]
+  ElseIF i2 > 20 && i2 < 41
+    rain = new ObjectReference[40]
+  ElseIF i2 > 40 && i2 < 61
+    rain = new ObjectReference[60]
+  ElseIF i2 > 60 && i2 < 81
+    rain = new ObjectReference[80]
+  ElseIF i2 > 80 && i2 < 101
+    rain = new ObjectReference[100]
+  Else 
+    rain = new ObjectReference[128]
+  EndIf
+
+   If TentType == 3
+    xPos = -3000*Sin(relePos)
+    YPos = -300*Cos(relePos)
+  ElseIf TentType == 4
+    xPos = 100*Sin(relePos)
+    YPos = 100*Cos(relePos)
+  EndIf
+  while i < i2
+    if rain[i] == none
+     if i > FirstHalf
+      rain[i] = OriginPosition.PlaceAtMe(rainFar,1,abForcePersist = false, abInitiallyDisabled = true)
+      rain[i].MoveTo(OriginPosition,xPosNear,yPosNear,600)
+     Else
+      rain[i] = OriginPosition.PlaceAtMe(rainNear,1,abForcePersist = false, abInitiallyDisabled = true)
+      rain[i].MoveTo(OriginPosition,xPos,yPos,800)
+      ;rain[i].MoveTo(OriginPosition,0,0,800)
+     EndIf
+      If TentType == 3
+      rain[i].SetAngle(0,0,relePos+90)
+      ElseIf TentType == 4
+      rain[i].SetAngle(0,0,relePos)  
+      EndIf
+    else
+      i += 1
+    endif
+   EndWhile
+  If RS_Debug.GetValue() != 0
+  Notification("Finished Creating Rain")
+  EndIf
+Return 0
+EndFunction
+
+Function EnableRain(bool bFade)
+ Int iIndex = rain.Length
+
+  While iIndex > 0
+        iIndex -= 1
+        if rain[iIndex] != none
+        rain[iIndex].EnableNoWait(bFade)
+        EndIf
+  EndWhile
+  If RS_Debug.GetValue() != 0
+    Trace("I am Enabling Rain " + rain.Length)
+  EndIf
+  Utility.Wait(0.2)
+EndFunction
+
+Function DisableRain(bool bFade, bool bFastMode = false)
+ Int iIndex = rain.Length
+  While iIndex > 0
+        iIndex -= 1
+        if rain[iIndex] != none
+        rain[iIndex].DisableNoWait(bFade)
+        EndIf
+  EndWhile
+  If !bFastMode
+  Utility.Wait(0.2)
+  EndIf
+EndFunction
+
+Function DeleteRain()
+    If RS_Debug.GetValue() != 0
+    Notification("I am Deleting Rain")
+    Trace("I Am Deleting Rain")
+    EndIf
+  Int iIndex = 0
+  While iIndex < rain.Length
+      If rain[iIndex] != none
+        rain[iIndex].Delete()
+        rain[iIndex] = none
+      endif
+        iIndex += 1
+  EndWhile
+EndFunction
+/;

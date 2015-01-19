@@ -26,7 +26,7 @@ float[] Property snowPos Auto
 ObjectReference[] snow
 
 
-Function GiveInfo(Bool Leftt, float MHAngle, int tentTypee, float relativPoss, FormList Tent, FormList severeWeather, GlobalVariable TimeUnderShelter, GlobalVariable debug1)
+bool Function GiveInfo(Bool Leftt, float MHAngle, int tentTypee, float relativPoss, FormList Tent, FormList severeWeather, GlobalVariable TimeUnderShelter, GlobalVariable debug1)
 
   Left = Leftt
   MHA = MHAngle
@@ -36,11 +36,11 @@ Function GiveInfo(Bool Leftt, float MHAngle, int tentTypee, float relativPoss, F
   _DE_SevereWeatherList = severeWeather
   RS_TimeUnderShelter = TimeUnderShelter
   RS_Debug = debug1
-  GetSnowPositions()
+  return true
 EndFunction
 
 
-Event RS_CreateSnow(Form Type)
+Event RS_CreateSnow(Form Type, float relePos)
   
   int Amount = RS_FFSnowAmount.GetValue() As Int
   ;DEBUG===========
@@ -201,7 +201,8 @@ Event EnableSnow(float windspeed, float MHAa, float rsIndex)
           angle2 = Utility.RandomFloat(windRange*(1+MHAa), -windRange*(1+MHAa)) + windDirection
           randomHeight = Utility.RandomFloat(150, 350)
           snow[i].MoveTo(self, snowPos[posArraySize], snowPos[posArraySize+1],randomHeight)
-          snow[i].SetAngle(multiple,0,angle2)    
+          snow[i].SetAngle(multiple,0,angle2)
+          snow[i].EnableNoWait(true)
           ;snow[iIndex].SetAngle(0,0,180)
         EndIf
       i += increase
@@ -209,12 +210,12 @@ Event EnableSnow(float windspeed, float MHAa, float rsIndex)
     EndWhile
     i = 0
     posArraySize = 0
-    While i < iIndex
-      if snow[i] != none
-        snow[i].EnableNoWait(true)
-      EndIf
-      i += increase
-    EndWhile 
+    ;While i < iIndex
+    ;  if snow[i] != none
+    ;    snow[i].EnableNoWait(true)
+    ;  EndIf
+    ;  i += increase
+    ;EndWhile 
     If RS_Debug.GetValue() != 0  
       If Left
       Notification("I Have Enabled All The SnowLeft")
@@ -229,7 +230,7 @@ UnregisterForModEvent("RS_EnableSnow")
 EndEvent
 
 
-Event DisableSnow(bool bDelete)
+Event DisableSnow()
   Int iIndex = snow.Length
   While iIndex > 0
       iIndex -= 1
@@ -238,14 +239,14 @@ Event DisableSnow(bool bDelete)
         EndIf
   EndWhile
   Utility.Wait(0.2)
-  If bDelete == true
-    DeleteSelf()
-  EndIf
 UnregisterForModEvent("RS_DisableSnow")
 EndEvent
 
 Function DeleteSnow()
   Int iIndex = snow.Length
+  If RS_Debug.GetValue() != 0
+    Trace("I Am Deleting Snow1")
+  EndIf
   While iIndex > 0
       iIndex -= 1
         if snow[iIndex] != none
@@ -253,7 +254,8 @@ Function DeleteSnow()
         EndIf
         snow[iIndex] = none
   EndWhile
-  snow = new ObjectReference[1]
+  Debug.Trace("RealShelter: Frostfall Ignore Warning Below")
+  snow = none
   createdSnow = false
 EndFunction
 
@@ -262,10 +264,10 @@ EndFunction
 Event DeleteSelf()
   ObjectReference temp
   UnregisterForAllModEvents()
+  RegisterForUpdate(10)
+  DisableSnow()
   DeleteSnow()
-  temp = Game.FindClosestReferenceOfAnyTypeInListFromRef(TentStaticList, self, 195.0)
-  If temp == none
-    snow = none
+  ;temp = Game.FindClosestReferenceOfAnyTypeInListFromRef(TentStaticList, self, 195.0)
     If RS_Debug.GetValue() != 0
       If Left
         Notification("I RSHelperLeft am deleting myself  Goodbye")
@@ -275,8 +277,8 @@ Event DeleteSelf()
     Trace(self + "I am deleting myself")
     EndIf
     Disable()
+    UnRegisterForUpdate()
     Delete()
-  EndIf
 EndEvent
 
 Function UnregisterForEvents()
@@ -285,7 +287,7 @@ EndFunction
 
 bool Function isReady()
   while createdSnow == false
-    Utility.Wait(0.1)
+    Utility.Wait(0.2)
   EndWhile
   return true
 EndFunction
